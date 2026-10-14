@@ -17,6 +17,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [accountBalance] = useState(10000);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  // Refs pour éviter les problèmes de closure dans setInterval
+  const runningRef = useRef(false);
+  const marketDataRef = useRef(marketData);
+  const rulesRef = useRef(rules);
+  
+  // Mettre à jour les refs quand les états changent
+  useEffect(() => {
+    marketDataRef.current = marketData;
+  }, [marketData]);
+  
+  useEffect(() => {
+    rulesRef.current = rules;
+  }, [rules]);
 
   const initDesk = useCallback(() => {
     const data = generateMarketData();
@@ -54,22 +68,25 @@ export default function App() {
 
   // Run the full desk cycle
   const runDeskCycle = useCallback(() => {
-    if (!deskState || !deskState.running) return;
+    if (!runningRef.current) return;
+    const currentMarketData = marketDataRef.current;
+    const currentRules = rulesRef.current;
+    if (currentMarketData.size === 0) return;
 
     setDeskState(prev => {
-      if (!prev) return prev;
+      if (!prev || !prev.running) return prev;
       const now = Date.now();
       const allLogs: LogEntry[] = [];
       let newBots = [...prev.botStatuses];
 
       // 1. SCREENER
       newBots[0] = { ...newBots[0], status: 'RUNNING', lastRun: now };
-      const coinArray = Array.from(marketData.entries()).map(([symbol, data]) => ({
+      const coinArray = Array.from(currentMarketData.entries()).map(([symbol, data]) => ({
         symbol,
         dailyCandles: data.dailyCandles,
         h4Candles: data.h4Candles,
       }));
-      const screenerResult = runScreener(coinArray, rules);
+      const screenerResult = runScreener(coinArray, currentRules);
       const newWatchlist = [...prev.watchlist];
       for (const entry of screenerResult.watchlist) {
         if (!newWatchlist.find(w => w.coin === entry.coin)) {
@@ -88,11 +105,11 @@ export default function App() {
       newBots[1] = { ...newBots[1], status: 'RUNNING', lastRun: now };
       const h4Data = new Map<string, import('./types').Candle[]>();
       const h1Data = new Map<string, import('./types').Candle[]>();
-      for (const [coin, data] of marketData) {
+      for (const [coin, data] of currentMarketData) {
         h4Data.set(coin, data.h4Candles);
         h1Data.set(coin, data.h1Candles);
       }
-      const currentPrices = getCurrentPrices(marketData);
+      const currentPrices = getCurrentPrices(currentMarketData);
       const cartographerResult = runCartographer(newWatchlist, h4Data, h1Data, currentPrices);
       allLogs.push(...cartographerResult.logs);
       let totalZones = 0;
@@ -108,7 +125,7 @@ export default function App() {
 
       // 3. RISK OFFICER
       newBots[2] = { ...newBots[2], status: 'RUNNING', lastRun: now };
-      const riskResult = runRiskOfficer(cartographerResult.zoneMaps, prev.accountBalance, rules, prev.positions);
+      const riskResult = runRiskOfficer(cartographerResult.zoneMaps, prev.accountBalance, currentRules, prev.positions);
       allLogs.push(...riskResult.logs);
       const newPlans = [...prev.tradePlans];
       for (const plan of riskResult.tradePlans) {
@@ -148,14 +165,14 @@ export default function App() {
       const dailyCloses = new Map<string, number>();
       const anchorHighs = new Map<string, number>();
       const marketStates = new Map<string, string>();
-      for (const [coin, data] of marketData) {
+      for (const [coin, data] of currentMarketData) {
         const lastDaily = data.dailyCandles[data.dailyCandles.length - 1];
         dailyCloses.set(coin, lastDaily.close);
         const wl = newWatchlist.find(w => w.coin === coin);
         if (wl) anchorHighs.set(coin, wl.anchorHigh);
         marketStates.set(coin, 'BEARISH');
       }
-      const exitResult = runExitClerk(prev.positions, currentPrices, dailyCloses, anchorHighs, rules, marketStates);
+      const exitResult = runExitClerk(prev.positions, currentPrices, dailyCloses, anchorHighs, currentRules, marketStates);
       allLogs.push(...exitResult.logs);
       newBots[4] = {
         ...newBots[4],
@@ -166,7 +183,7 @@ export default function App() {
 
       // 6. AUDITOR
       newBots[5] = { ...newBots[5], status: 'RUNNING', lastRun: now };
-      const auditReport = prev.trades.length > 0 ? runAuditor(prev.trades, rules) : null;
+      const auditReport = prev.trades.length > 0 ? runAuditor(prev.trades, currentRules) : null;
       newBots[5] = {
         ...newBots[5],
         status: 'IDLE',
@@ -191,7 +208,7 @@ export default function App() {
         logs: [...allLogs, ...prev.logs].slice(0, 200),
       };
     });
-  }, [deskState, marketData, rules]);
+  }, []); // Pas de dépendances : on utilise les refs
 
   // Handle gate decision
   const handleGateDecision = (alertId: string, decision: 'TAKEN' | 'SKIPPED') => {
@@ -315,9 +332,14 @@ export default function App() {
 
   // Auto-close positions for simulation
   const simulateExits = useCallback(() => {
+    if (!runningRef.current) return;
+    const currentMarketData = marketDataRef.current;
+    const currentRules = rulesRef.current;
+    if (currentMarketData.size === 0) return;
+    
     setDeskState(prev => {
-      if (!prev) return prev;
-      const currentPrices = getCurrentPrices(marketData);
+      if (!prev || !prev.running) return prev;
+      const currentPrices = getCurrentPrices(currentMarketData);
       const now = Date.now();
 
       const positions = prev.positions.map(p => {
@@ -363,19 +385,27 @@ export default function App() {
       }));
 
       const updatedTrades = [...prev.trades, ...newTrades];
-      const auditReport = updatedTrades.length > 0 ? runAuditor(updatedTrades, rules) : prev.auditReport;
+      const auditReport = updatedTrades.length > 0 ? runAuditor(updatedTrades, currentRules) : prev.auditReport;
 
       return { ...prev, positions, trades: updatedTrades, auditReport };
     });
-  }, [marketData, rules]);
+  }, []); // Pas de dépendances : on utilise les refs
 
   // Start/stop the desk
   const toggleDesk = () => {
     setDeskState(prev => {
       if (!prev) return prev;
-      const running = !prev.running;
-      if (running) {
-        // Start intervals
+      const newRunning = !prev.running;
+      runningRef.current = newRunning; // Mettre à jour le ref immédiatement
+      
+      if (newRunning) {
+        // Premier cycle immédiat
+        setTimeout(() => {
+          runDeskCycle();
+          simulateExits();
+        }, 100);
+        
+        // Puis cycles réguliers toutes les 3 secondes
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = setInterval(() => {
           runDeskCycle();
@@ -387,7 +417,23 @@ export default function App() {
           intervalRef.current = null;
         }
       }
-      return { ...prev, running };
+      const startLog: LogEntry = newRunning ? {
+        timestamp: Date.now(),
+        bot: 'System',
+        message: '🚀 Desk started — 6 bots online, scanning...',
+        level: 'SUCCESS',
+      } : {
+        timestamp: Date.now(),
+        bot: 'System',
+        message: '⏹ Desk stopped',
+        level: 'WARN',
+      };
+
+      return {
+        ...prev,
+        running: newRunning,
+        logs: [startLog, ...prev.logs].slice(0, 200),
+      };
     });
   };
 
