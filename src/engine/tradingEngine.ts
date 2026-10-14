@@ -18,7 +18,10 @@ export const DEFAULT_RULES: DeskRules = {
 // ============ SCREENER ============
 // Three-candle rule for trend change detection
 export function detectTrendChange(candles: Candle[], direction: 'short' | 'long'): TrendDirection {
-  if (candles.length < 3) return 'NEUTRAL';
+  if (candles.length < 3) {
+    console.log(`    ⚠️ detectTrendChange: pas assez de bougies (${candles.length} < 3)`);
+    return 'NEUTRAL';
+  }
   
   const c1 = candles[candles.length - 3];
   const c2 = candles[candles.length - 2];
@@ -34,7 +37,16 @@ export function detectTrendChange(candles: Candle[], direction: 'short' | 'long'
     const c3BelowC2 = c3.close < c2.close;
     const neitherTouchesC1High = c2.high <= c1.high && c3.high <= c1.high;
 
+    console.log(`    📊 Short check:`, {
+      c1Down: `${c1.close.toFixed(2)} < ${c1.open.toFixed(2)} = ${c1Down}`,
+      c2BelowC1: `${c2.close.toFixed(2)} < ${c1.close.toFixed(2)} = ${c2BelowC1}`,
+      c2NotAboveC1High: `${c2.high.toFixed(2)} <= ${c1.high.toFixed(2)} = ${c2NotAboveC1High}`,
+      c3BelowC2: `${c3.close.toFixed(2)} < ${c2.close.toFixed(2)} = ${c3BelowC2}`,
+      neitherTouchesC1High: `${c2.high.toFixed(2)},${c3.high.toFixed(2)} <= ${c1.high.toFixed(2)} = ${neitherTouchesC1High}`,
+    });
+
     if (c1Down && c2BelowC1 && c2NotAboveC1High && c3BelowC2 && neitherTouchesC1High) {
+      console.log(`    ✅ BEARISH detected!`);
       return 'BEARISH';
     }
   } else {
@@ -45,11 +57,21 @@ export function detectTrendChange(candles: Candle[], direction: 'short' | 'long'
     const c3AboveC2 = c3.close > c2.close;
     const neitherTouchesC1Low = c2.low >= c1.low && c3.low >= c1.low;
 
+    console.log(`    📊 Long check:`, {
+      c1Up: `${c1.close.toFixed(2)} > ${c1.open.toFixed(2)} = ${c1Up}`,
+      c2AboveC1: `${c2.close.toFixed(2)} > ${c1.close.toFixed(2)} = ${c2AboveC1}`,
+      c2NotBelowC1Low: `${c2.low.toFixed(2)} >= ${c1.low.toFixed(2)} = ${c2NotBelowC1Low}`,
+      c3AboveC2: `${c3.close.toFixed(2)} > ${c2.close.toFixed(2)} = ${c3AboveC2}`,
+      neitherTouchesC1Low: `${c2.low.toFixed(2)},${c3.low.toFixed(2)} >= ${c1.low.toFixed(2)} = ${neitherTouchesC1Low}`,
+    });
+
     if (c1Up && c2AboveC1 && c2NotBelowC1Low && c3AboveC2 && neitherTouchesC1Low) {
+      console.log(`    ✅ BULLISH detected!`);
       return 'BULLISH';
     }
   }
 
+  console.log(`    ❌ NEUTRAL - conditions non remplies`);
   return 'NEUTRAL';
 }
 
@@ -72,14 +94,20 @@ export function runScreener(
   const logs: LogEntry[] = [];
   const now = Date.now();
 
+  console.log(`🔍 Screener: analyse de ${coins.length} coins...`);
+
   for (const coin of coins) {
     const dailyTrend = detectTrendChange(coin.dailyCandles, 'short');
     const bullishTrend = detectTrendChange(coin.dailyCandles, 'long');
+
+    console.log(`  ${coin.symbol}: daily=${dailyTrend}, bullish=${bullishTrend}, candles=${coin.dailyCandles.length}`);
 
     if (rules.direction === 'SHORT_ONLY' && dailyTrend === 'BEARISH') {
       const h4Bouncing = isH4Bouncing(coin.h4Candles);
       const tag: ScreenerTag = h4Bouncing ? 'PRIME' : 'STANDARD';
       const anchorHigh = Math.max(...coin.dailyCandles.slice(-10).map(c => c.high));
+
+      console.log(`  ✅ ${coin.symbol} → ${tag} (h4Bouncing=${h4Bouncing})`);
 
       watchlist.push({
         coin: coin.symbol,
@@ -97,15 +125,19 @@ export function runScreener(
         level: tag === 'PRIME' ? 'SUCCESS' : 'INFO',
       });
     } else if (bullishTrend === 'BULLISH') {
+      console.log(`  ℹ️ ${coin.symbol} → bullish flip (context only)`);
       logs.push({
         timestamp: now,
         bot: 'Screener',
         message: `${coin.symbol} → bullish flip detected (logged as context only, never traded)`,
         level: 'INFO',
       });
+    } else {
+      console.log(`  ❌ ${coin.symbol} → pas de retournement détecté`);
     }
   }
 
+  console.log(`✅ Screener terminé: ${watchlist.length} coins dans la watchlist`);
   return { watchlist, logs };
 }
 
