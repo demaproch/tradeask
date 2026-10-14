@@ -191,10 +191,22 @@ export default function App() {
 
   // Run the full desk cycle
   const runDeskCycle = useCallback(() => {
-    if (!runningRef.current) return;
+    console.log('🔍 runDeskCycle appelé', {
+      running: runningRef.current,
+      marketDataSize: marketDataRef.current.size,
+      hasInterval: !!intervalRef.current
+    });
+    
+    if (!runningRef.current) {
+      console.log('❌ runDeskCycle: runningRef.current est false, retour');
+      return;
+    }
     const currentMarketData = marketDataRef.current;
     const currentRules = rulesRef.current;
-    if (currentMarketData.size === 0) return;
+    if (currentMarketData.size === 0) {
+      console.log('❌ runDeskCycle: marketData vide, retour');
+      return;
+    }
 
     console.log('🔄 Cycle de scan démarré...');
 
@@ -539,10 +551,13 @@ export default function App() {
       if (!prev) return prev;
       const newRunning = !prev.running;
       runningRef.current = newRunning; // Mettre à jour le ref immédiatement
+      console.log('🔄 runningRef.current mis à jour:', newRunning);
       
       if (newRunning) {
+        console.log('✅ Démarrage du desk, création de l\'interval');
         // Premier cycle immédiat
         setTimeout(() => {
+          console.log('⏰ Premier cycle (setTimeout 100ms)');
           runDeskCycle();
           simulateExits();
         }, 100);
@@ -550,10 +565,13 @@ export default function App() {
         // Puis cycles réguliers toutes les 3 secondes
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = setInterval(() => {
+          console.log('⏰ Cycle régulier (setInterval 3s)');
           runDeskCycle();
           simulateExits();
         }, 3000);
+        console.log('✅ Interval créé:', intervalRef.current);
       } else {
+        console.log('⏹ Arrêt du desk, suppression de l\'interval');
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
