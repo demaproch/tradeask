@@ -10,9 +10,9 @@ Le bot de trading supporte maintenant **deux modes de données** :
 - **Aucun rapport avec la réalité du marché**
 - Démarrage instantané
 
-### 📡 Mode LIVE (CoinGecko API)
+### 📡 Mode LIVE (Binance API)
 - Données réelles du marché crypto
-- Prix actuels et historiques OHLC
+- Prix actuels et historiques OHLC (klines)
 - Mise à jour automatique toutes les 2 minutes
 - **Reflet fidèle de ce qui se passe sur les exchanges**
 
@@ -49,15 +49,17 @@ En haut à droite de l'interface, tu verras un bouton :
 ## 📡 Mode LIVE - Détails techniques
 
 ### Source des données
-- **API** : CoinGecko (gratuit, sans clé API)
-- **Rate limit** : ~10-30 requêtes/minute
-- **Cache** : 1 minute pour éviter le spam
+- **API** : Binance (gratuit, sans clé API)
+- **Rate limit** : ~1200 requêtes/minute
+- **Cache** : 30 secondes pour éviter le spam
+- **CORS** : Supporté nativement (pas de problème de navigateur)
 
 ### Données récupérées
 Pour chaque coin (BTC, ETH, SOL, etc.) :
-- **Daily candles** : 90 jours d'historique
-- **4H candles** : 30 jours d'historique
-- **1H candles** : 7 jours d'historique
+- **Daily candles (1d)** : 90 jours d'historique
+- **4H candles (4h)** : 180 bougies = 30 jours d'historique
+- **1H candles (1h)** : 168 bougies = 7 jours d'historique
+- **Volume** : Inclus dans chaque bougie
 
 ### Mise à jour automatique
 - **Toutes les 2 minutes** en mode LIVE
@@ -84,23 +86,25 @@ INJ  → Injective
 
 ## ⚠️ Limitations
 
-### CoinGecko API (gratuit)
-- **Rate limit strict** : ne pas rafraîchir trop souvent
-- **Pas de volume** dans les données OHLC
-- **Latence** : les données ne sont pas en temps réel (quelques minutes de décalage)
-- **Pas de WebSocket** : pas de streaming temps réel
+### Binance API (gratuit)
+- **Rate limit généreux** : 1200 requêtes/minute
+- **Volume inclus** dans chaque bougie
+- **Latence faible** : données quasi temps réel (quelques secondes)
+- **Supporte CORS** : fonctionne directement depuis le navigateur
+- **Pas de WebSocket** dans cette version : pas de streaming temps réel
 
 ### Ce que tu NE verras PAS
-- ❌ Prix en temps réel (tick par tick)
+- ❌ Prix en temps réel (tick par tick) - nécessite WebSocket
 - ❌ Carnet d'ordres (order book)
-- ❌ Volume précis par bougie
 - ❌ Données de futures/perpétuels (spot uniquement)
 
 ### Ce que tu VERRAS
 - ✅ Prix spot réels
 - ✅ Historique OHLC fiable
+- ✅ Volume par bougie
 - ✅ Tendances de marché authentiques
 - ✅ Signaux basés sur des données réelles
+- ✅ Données quasi temps réel (quelques secondes de latence)
 
 ---
 
@@ -158,23 +162,23 @@ const COIN_MAP: Record<string, string> = {
 
 ### "L'API ne répond pas"
 - Vérifie ta connexion internet
-- CoinGecko peut être temporairement indisponible
+- Binance peut être temporairement indisponible
 - Le bot fallback automatiquement sur SIM
 
 ### "Les données ne se mettent pas à jour"
 - Vérifie que tu es en mode LIVE (point vert)
-- Le cache dure 1 minute : attends un peu
+- Le cache dure 30 secondes : attends un peu
 - Clique sur le bouton 🔄 pour forcer le refresh
 
 ### "Rate limit atteint"
-- Tu as fait trop de requêtes
-- Attends 1 minute avant de réessayer
+- Tu as fait trop de requêtes (peu probable avec Binance)
+- Attends 10 secondes avant de réessayer
 - Le bot gère ça automatiquement avec retry
 
 ### "Les prix semblent bizarres"
-- CoinGecko utilise les prix SPOT, pas futures
-- Il y a un décalage de quelques minutes
-- C'est normal, ce n'est pas du temps réel
+- Binance utilise les prix SPOT, pas futures
+- La latence est de quelques secondes seulement
+- Vérifie que la paire est correcte (ex: BTCUSDT)
 
 ---
 
@@ -202,10 +206,10 @@ const COIN_MAP: Record<string, string> = {
 
 ## 📚 Ressources
 
-- **CoinGecko API Docs** : https://www.coingecko.com/api/documentation
-- **Rate limits** : https://www.coingecko.com/en/api/pricing
+- **Binance API Docs** : https://binance-docs.github.io/apidocs/
+- **Rate limits** : https://binance-docs.github.io/apidocs/spot/en/#limits
 - **Alternative APIs** :
-  - Binance : https://binance-docs.github.io/apidocs/
+  - CoinGecko : https://www.coingecko.com/api/documentation
   - CoinMarketCap : https://coinmarketcap.com/api/
   - CryptoCompare : https://min-api.cryptocompare.com/
 

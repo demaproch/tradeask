@@ -1,22 +1,22 @@
 import { Candle, CoinData } from '../types';
 
-// CoinGecko API configuration
-const COINGECKO_BASE_URL = 'https://api.coingecko.com/api/v3';
+// Binance API configuration
+const BINANCE_BASE_URL = 'https://api.binance.com/api/v3';
 
-// Mapping de nos symboles vers les IDs CoinGecko
+// Mapping de nos symboles vers les paires Binance (USDT)
 const COIN_MAP: Record<string, string> = {
-  BTC: 'bitcoin',
-  ETH: 'ethereum',
-  SOL: 'solana',
-  AVAX: 'avalanche-2',
-  DOGE: 'dogecoin',
-  LINK: 'chainlink',
-  MATIC: 'matic-network',
-  ARB: 'arbitrum',
-  OP: 'optimism',
-  APT: 'aptos',
-  SUI: 'sui',
-  INJ: 'injective-protocol',
+  BTC: 'BTCUSDT',
+  ETH: 'ETHUSDT',
+  SOL: 'SOLUSDT',
+  AVAX: 'AVAXUSDT',
+  DOGE: 'DOGEUSDT',
+  LINK: 'LINKUSDT',
+  MATIC: 'MATICUSDT',
+  ARB: 'ARBUSDT',
+  OP: 'OPUSDT',
+  APT: 'APTUSDT',
+  SUI: 'SUIUSDT',
+  INJ: 'INJUSDT',
 };
 
 // Cache pour éviter de spammer l'API
@@ -26,7 +26,7 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<any>>();
-const CACHE_DURATION = 60000; // 1 minute
+const CACHE_DURATION = 30000; // 30 secondes (Binance est plus permissif)
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
@@ -50,8 +50,8 @@ async function fetchWithRetry(url: string, retries = 3): Promise<any> {
       
       if (response.status === 429) {
         // Rate limit atteint, attendre avant de réessayer
-        console.warn('Rate limit atteint, attente de 60 secondes...');
-        await new Promise(resolve => setTimeout(resolve, 60000));
+        console.warn('Rate limit atteint, attente de 10 secondes...');
+        await new Promise(resolve => setTimeout(resolve, 10000));
         continue;
       }
       
@@ -75,14 +75,14 @@ export async function fetchCurrentPrices(): Promise<Map<string, number>> {
   if (cached) return cached;
 
   try {
-    const ids = Object.values(COIN_MAP).join(',');
-    const url = `${COINGECKO_BASE_URL}/simple/price?ids=${ids}&vs_currencies=usd`;
+    const url = `${BINANCE_BASE_URL}/ticker/price`;
     const data = await fetchWithRetry(url);
 
     const prices = new Map<string, number>();
-    for (const [symbol, geckoId] of Object.entries(COIN_MAP)) {
-      if (data[geckoId]?.usd) {
-        prices.set(symbol, data[geckoId].usd);
+    for (const [symbol, pair] of Object.entries(COIN_MAP)) {
+      const ticker = data.find((t: any) => t.symbol === pair);
+      if (ticker) {
+        prices.set(symbol, parseFloat(ticker.price));
       }
     }
 
@@ -94,34 +94,47 @@ export async function fetchCurrentPrices(): Promise<Map<string, number>> {
   }
 }
 
-// Récupérer l'historique OHLC d'un coin
-// days: 1, 7, 14, 30, 90, 180, 365
-export async function fetchOHLC(coinSymbol: string, days: number = 30): Promise<Candle[]> {
-  const geckoId = COIN_MAP[coinSymbol];
-  if (!geckoId) return [];
+// Récupérer les klines (bougies) d'un coin
+// interval: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+// limit: max 1000 bougies
+export async function fetchKlines(
+  coinSymbol: string, 
+  interval: string, 
+  limit: number = 100
+): Promise<Candle[]> {
+  const pair = COIN_MAP[coinSymbol];
+  if (!pair) return [];
 
-  const cacheKey = `ohlc-${coinSymbol}-${days}`;
+  const cacheKey = `klines-${coinSymbol}-${interval}-${limit}`;
   const cached = getCached<Candle[]>(cacheKey);
   if (cached) return cached;
 
   try {
-    const url = `${COINGECKO_BASE_URL}/coins/${geckoId}/ohlc?vs_currency=usd&days=${days}`;
+    const url = `${BINANCE_BASE_URL}/klines?symbol=${pair}&interval=${interval}&limit=${limit}`;
     const data = await fetchWithRetry(url);
 
-    // CoinGecko retourne: [timestamp, open, high, low, close]
-    const candles: Candle[] = data.map((item: number[]) => ({
+    // Binance retourne: [
+    //   0: Open time,
+    //   1: Open,
+    //   2: High,
+    //   3: Low,
+    //   4: Close,
+    //   5: Volume,
+    //   ...
+    // ]
+    const candles: Candle[] = data.map((item: any[]) => ({
       timestamp: item[0],
-      open: item[1],
-      high: item[2],
-      low: item[3],
-      close: item[4],
-      volume: 0, // CoinGecko OHLC ne fournit pas le volume
+      open: parseFloat(item[1]),
+      high: parseFloat(item[2]),
+      low: parseFloat(item[3]),
+      close: parseFloat(item[4]),
+      volume: parseFloat(item[5]),
     }));
 
     setCache(cacheKey, candles);
     return candles;
   } catch (error) {
-    console.error(`Erreur lors du fetch OHLC pour ${coinSymbol}:`, error);
+    console.error(`Erreur lors du fetch klines pour ${coinSymbol} (${interval}):`, error);
     return [];
   }
 }
@@ -131,9 +144,9 @@ export async function fetchCoinData(coinSymbol: string): Promise<CoinData | null
   try {
     // Fetch en parallèle pour gagner du temps
     const [dailyCandles, h4Candles, h1Candles] = await Promise.all([
-      fetchOHLC(coinSymbol, 90), // 90 jours pour le daily
-      fetchOHLC(coinSymbol, 30), // 30 jours pour le 4H
-      fetchOHLC(coinSymbol, 7),  // 7 jours pour le 1H
+      fetchKlines(coinSymbol, '1d', 90),   // 90 jours pour le daily
+      fetchKlines(coinSymbol, '4h', 180),  // 180 bougies 4H = 30 jours
+      fetchKlines(coinSymbol, '1h', 168),  // 168 bougies 1H = 7 jours
     ]);
 
     if (dailyCandles.length === 0) return null;
@@ -155,14 +168,14 @@ export async function fetchAllMarketData(): Promise<Map<string, CoinData>> {
   const data = new Map<string, CoinData>();
   
   // Fetch séquentiel pour éviter de spammer l'API
-  // CoinGecko a un rate limit de ~10-30 calls/minute
+  // Binance permet ~1200 requêtes/minute, mais on reste prudent
   for (const symbol of Object.keys(COIN_MAP)) {
     const coinData = await fetchCoinData(symbol);
     if (coinData) {
       data.set(symbol, coinData);
     }
-    // Petit délai entre chaque requête
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Petit délai entre chaque coin (500ms)
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 
   return data;
@@ -171,7 +184,7 @@ export async function fetchAllMarketData(): Promise<Map<string, CoinData>> {
 // Vérifier si l'API est accessible
 export async function checkApiStatus(): Promise<boolean> {
   try {
-    const url = `${COINGECKO_BASE_URL}/ping`;
+    const url = `${BINANCE_BASE_URL}/ping`;
     const response = await fetch(url);
     return response.ok;
   } catch {
@@ -182,7 +195,21 @@ export async function checkApiStatus(): Promise<boolean> {
 // Obtenir les informations sur les rate limits
 export function getRateLimitInfo(): { requestsPerMinute: number; cacheDuration: number } {
   return {
-    requestsPerMinute: 10, // CoinGecko free tier
+    requestsPerMinute: 1200, // Binance free tier
     cacheDuration: CACHE_DURATION,
   };
+}
+
+// Récupérer les données d'un coin spécifique (utile pour refresh individuel)
+export async function refreshCoinData(coinSymbol: string): Promise<CoinData | null> {
+  // Invalider le cache pour ce coin
+  Object.keys(COIN_MAP).forEach(key => {
+    if (key === coinSymbol) {
+      cache.delete(`klines-${key}-1d-90`);
+      cache.delete(`klines-${key}-4h-180`);
+      cache.delete(`klines-${key}-1h-168`);
+    }
+  });
+  
+  return fetchCoinData(coinSymbol);
 }

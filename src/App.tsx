@@ -58,7 +58,7 @@ export default function App() {
       let data: Map<string, CoinData>;
       
       if (mode === 'live') {
-        console.log('📡 Chargement des données réelles depuis CoinGecko...');
+        console.log('📡 Chargement des données réelles depuis Binance...');
         data = await fetchAllMarketData();
         console.log(`✅ ${data.size} coins chargés`);
       } else {
@@ -622,7 +622,7 @@ export default function App() {
                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30'
                   : 'bg-blue-500/20 text-blue-400 border-blue-500/30 hover:bg-blue-500/30'
               } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              title={dataMode === 'live' ? 'Mode LIVE : données réelles CoinGecko' : 'Mode SIM : données simulées'}
+              title={dataMode === 'live' ? 'Mode LIVE : données réelles Binance' : 'Mode SIM : données simulées'}
             >
               {loading ? '⏳ Loading...' : dataMode === 'live' ? '📡 LIVE' : '🎲 SIM'}
             </button>
