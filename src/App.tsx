@@ -196,6 +196,8 @@ export default function App() {
     const currentRules = rulesRef.current;
     if (currentMarketData.size === 0) return;
 
+    console.log('🔄 Cycle de scan démarré...');
+
     setDeskState(prev => {
       if (!prev || !prev.running) return prev;
       const now = Date.now();
@@ -203,6 +205,7 @@ export default function App() {
       let newBots = [...prev.botStatuses];
 
       // 1. SCREENER
+      console.log('🔍 Screener: analyse en cours...');
       newBots[0] = { ...newBots[0], status: 'RUNNING', lastRun: now };
       const coinArray = Array.from(currentMarketData.entries()).map(([symbol, data]) => ({
         symbol,
@@ -210,6 +213,7 @@ export default function App() {
         h4Candles: data.h4Candles,
       }));
       const screenerResult = runScreener(coinArray, currentRules);
+      console.log(`✅ Screener: ${screenerResult.watchlist.length} coins détectés`);
       const newWatchlist = [...prev.watchlist];
       for (const entry of screenerResult.watchlist) {
         if (!newWatchlist.find(w => w.coin === entry.coin)) {
@@ -225,6 +229,7 @@ export default function App() {
       };
 
       // 2. CARTOGRAPHER
+      console.log('🗺️ Cartographer: cartographie des zones...');
       newBots[1] = { ...newBots[1], status: 'RUNNING', lastRun: now };
       const h4Data = new Map<string, import('./types').Candle[]>();
       const h1Data = new Map<string, import('./types').Candle[]>();
@@ -234,6 +239,7 @@ export default function App() {
       }
       const currentPrices = getCurrentPrices(currentMarketData);
       const cartographerResult = runCartographer(newWatchlist, h4Data, h1Data, currentPrices);
+      console.log(`✅ Cartographer: ${cartographerResult.zoneMaps.size} coins cartographiés`);
       allLogs.push(...cartographerResult.logs);
       let totalZones = 0;
       for (const [, zm] of cartographerResult.zoneMaps) {
@@ -247,8 +253,10 @@ export default function App() {
       };
 
       // 3. RISK OFFICER
+      console.log('📐 Risk Officer: calcul des positions...');
       newBots[2] = { ...newBots[2], status: 'RUNNING', lastRun: now };
       const riskResult = runRiskOfficer(cartographerResult.zoneMaps, prev.accountBalance, currentRules, prev.positions);
+      console.log(`✅ Risk Officer: ${riskResult.tradePlans.length} trade plans créés`);
       allLogs.push(...riskResult.logs);
       const newPlans = [...prev.tradePlans];
       for (const plan of riskResult.tradePlans) {
@@ -264,6 +272,7 @@ export default function App() {
       };
 
       // 4. GATE — create alerts for approved plans
+      console.log('🚪 Gate: création des alertes...');
       newBots[3] = { ...newBots[3], status: 'RUNNING', lastRun: now };
       const newAlerts = [...prev.alerts];
       for (const plan of riskResult.tradePlans) {
@@ -276,6 +285,7 @@ export default function App() {
           });
         }
       }
+      console.log(`✅ Gate: ${newAlerts.filter(a => a.decision === 'PENDING').length} alertes en attente`);
       newBots[3] = {
         ...newBots[3],
         status: 'WAITING',
@@ -335,6 +345,7 @@ export default function App() {
 
   // Handle gate decision
   const handleGateDecision = (alertId: string, decision: 'TAKEN' | 'SKIPPED') => {
+    console.log(`🚪 Gate decision: ${alertId} → ${decision}`);
     setDeskState(prev => {
       if (!prev) return prev;
       const now = Date.now();
@@ -349,6 +360,7 @@ export default function App() {
         const alert = prev.alerts.find(a => a.id === alertId);
         if (alert) {
           const plan = alert.tradePlan;
+          console.log(`✅ Position ouverte: ${plan.coin} @ ${plan.entry}, stop ${plan.stop}, size ${plan.size}`);
           const newPos: Position = {
             id: `pos-${plan.id}`,
             coin: plan.coin,
@@ -573,10 +585,14 @@ export default function App() {
     const pendingAlerts = deskState.alerts.filter(a => a.decision === 'PENDING');
     if (pendingAlerts.length === 0) return;
     
+    console.log(`⏳ Auto-take: ${pendingAlerts.length} alertes en attente, décision dans 2s...`);
+    
     const timeout = setTimeout(() => {
+      console.log(`🎲 Auto-take: prise de décision pour ${pendingAlerts.length} alertes`);
       // Auto-take 70% of alerts (simulates human decision making)
       pendingAlerts.forEach(a => {
         const decision: 'TAKEN' | 'SKIPPED' = Math.random() > 0.3 ? 'TAKEN' : 'SKIPPED';
+        console.log(`  → ${a.tradePlan.coin}: ${decision}`);
         handleGateDecision(a.id, decision);
       });
     }, 2000);
@@ -614,17 +630,20 @@ export default function App() {
     startDesk();
   }, [deskState?.running, runDeskCycle, simulateExits, loadMarketData]);
 
-  // Rafraîchissement automatique des données en mode live (toutes les 2 min)
+  // Rafraîchissement automatique des données en mode live (toutes les 5 min)
   useEffect(() => {
     if (dataMode !== 'live') return;
     
     const refreshInterval = setInterval(async () => {
       console.log('🔄 Rafraîchissement automatique des données live...');
-      await loadMarketData('live');
-    }, 120000); // 2 minutes
+      const data = await fetchAllMarketData();
+      setMarketData(data);
+      marketDataRef.current = data;
+      setLastUpdate(Date.now());
+    }, 300000); // 5 minutes
     
     return () => clearInterval(refreshInterval);
-  }, [dataMode, loadMarketData]);
+  }, [dataMode]);
 
   // Cleanup
   useEffect(() => {
