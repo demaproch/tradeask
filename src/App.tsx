@@ -68,6 +68,7 @@ export default function App() {
       }
       
       setMarketData(data);
+      marketDataRef.current = data; // Mettre à jour le ref immédiatement
       setLastUpdate(Date.now());
       return data;
     } catch (error) {
@@ -75,6 +76,7 @@ export default function App() {
       // Fallback sur la simulation en cas d'erreur
       const fallbackData = generateMarketData();
       setMarketData(fallbackData);
+      marketDataRef.current = fallbackData; // Mettre à jour le ref immédiatement
       setLastUpdate(Date.now());
       return fallbackData;
     } finally {
@@ -115,7 +117,31 @@ export default function App() {
   const switchDataMode = async (mode: 'simulation' | 'live') => {
     setDataMode(mode);
     dataModeRef.current = mode;
+    
+    // Arrêter le desk temporairement
+    if (deskState?.running) {
+      runningRef.current = false;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+    
+    // Charger les nouvelles données
     await loadMarketData(mode);
+    
+    // Redémarrer le desk si il était actif
+    if (deskState?.running) {
+      runningRef.current = true;
+      setTimeout(() => {
+        runDeskCycle();
+        simulateExits();
+      }, 100);
+      intervalRef.current = setInterval(() => {
+        runDeskCycle();
+        simulateExits();
+      }, 3000);
+    }
   };
 
   // Mettre à jour les données de marché (pour le mode live)
@@ -146,14 +172,20 @@ export default function App() {
     }
   }, [initDesk]);
   
-  // Sauvegarder l'état à chaque changement
+  // Sauvegarder l'état à chaque changement (sans les données de marché)
   useEffect(() => {
     if (deskState) {
       const toSave = {
         ...deskState,
         zoneMaps: Object.fromEntries(deskState.zoneMaps),
+        // Ne pas sauvegarder les données de marché (trop volumineuses)
+        // Elles seront rechargées au démarrage
       };
-      localStorage.setItem('grokDeskState', JSON.stringify(toSave));
+      try {
+        localStorage.setItem('grokDeskState', JSON.stringify(toSave));
+      } catch (e) {
+        console.warn('Impossible de sauvegarder l\'état (quota dépassé?)', e);
+      }
     }
   }, [deskState]);
 
@@ -483,7 +515,14 @@ export default function App() {
   }, []); // Pas de dépendances : on utilise les refs
 
   // Start/stop the desk
-  const toggleDesk = () => {
+  const toggleDesk = async () => {
+    // Vérifier si les données sont chargées avant de démarrer
+    if (marketDataRef.current.size === 0 && !deskState?.running) {
+      console.log('⏳ Données non chargées, chargement en cours...');
+      await loadMarketData(dataModeRef.current);
+      console.log('✅ Données chargées, démarrage des bots...');
+    }
+    
     setDeskState(prev => {
       if (!prev) return prev;
       const newRunning = !prev.running;
@@ -511,7 +550,7 @@ export default function App() {
       const startLog: LogEntry = newRunning ? {
         timestamp: Date.now(),
         bot: 'System',
-        message: '🚀 Desk started — 6 bots online, scanning...',
+        message: `🚀 Desk started — 6 bots online, ${marketDataRef.current.size} coins loaded, scanning...`,
         level: 'SUCCESS',
       } : {
         timestamp: Date.now(),
@@ -547,22 +586,33 @@ export default function App() {
 
   // Redémarrage automatique si le desk était actif avant le refresh
   useEffect(() => {
-    if (deskState?.running && !intervalRef.current) {
-      runningRef.current = true;
+    const startDesk = async () => {
+      // Vérifier si les données sont chargées
+      if (marketDataRef.current.size === 0) {
+        console.log('⏳ Redémarrage automatique — chargement des données...');
+        await loadMarketData(dataModeRef.current);
+        console.log('✅ Données chargées, redémarrage des bots...');
+      }
       
-      // Premier cycle immédiat
-      setTimeout(() => {
-        runDeskCycle();
-        simulateExits();
-      }, 100);
-      
-      // Cycles réguliers
-      intervalRef.current = setInterval(() => {
-        runDeskCycle();
-        simulateExits();
-      }, 3000);
-    }
-  }, [deskState?.running, runDeskCycle, simulateExits]);
+      if (deskState?.running && !intervalRef.current) {
+        runningRef.current = true;
+        
+        // Premier cycle immédiat
+        setTimeout(() => {
+          runDeskCycle();
+          simulateExits();
+        }, 100);
+        
+        // Cycles réguliers
+        intervalRef.current = setInterval(() => {
+          runDeskCycle();
+          simulateExits();
+        }, 3000);
+      }
+    };
+    
+    startDesk();
+  }, [deskState?.running, runDeskCycle, simulateExits, loadMarketData]);
 
   // Rafraîchissement automatique des données en mode live (toutes les 2 min)
   useEffect(() => {
@@ -655,13 +705,16 @@ export default function App() {
             </button>
             <button
               onClick={toggleDesk}
+              disabled={loading}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                deskState.running
+                loading
+                  ? 'bg-gray-500/20 text-gray-400 border border-gray-500/30 cursor-not-allowed'
+                  : deskState.running
                   ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
                   : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
               }`}
             >
-              {deskState.running ? '⏹ Stop Desk' : '▶ Start Desk'}
+              {loading ? '⏳ Loading...' : deskState.running ? '⏹ Stop Desk' : '▶ Start Desk'}
             </button>
           </div>
         </div>
