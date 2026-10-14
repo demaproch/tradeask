@@ -62,9 +62,37 @@ export default function App() {
     });
   }, [accountBalance, rules]);
 
+  // Charger l'état sauvegardé ou initialiser
   useEffect(() => {
-    initDesk();
+    const savedState = localStorage.getItem('grokDeskState');
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState);
+        // Restaurer l'état avec running = true si c'était le cas
+        setDeskState({
+          ...parsed,
+          zoneMaps: new Map(Object.entries(parsed.zoneMaps || {})),
+          running: parsed.running || false,
+        });
+      } catch (e) {
+        console.error('Failed to load saved state:', e);
+        initDesk();
+      }
+    } else {
+      initDesk();
+    }
   }, [initDesk]);
+  
+  // Sauvegarder l'état à chaque changement
+  useEffect(() => {
+    if (deskState) {
+      const toSave = {
+        ...deskState,
+        zoneMaps: Object.fromEntries(deskState.zoneMaps),
+      };
+      localStorage.setItem('grokDeskState', JSON.stringify(toSave));
+    }
+  }, [deskState]);
 
   // Run the full desk cycle
   const runDeskCycle = useCallback(() => {
@@ -454,6 +482,25 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deskState?.alerts.length, deskState?.running]);
 
+  // Redémarrage automatique si le desk était actif avant le refresh
+  useEffect(() => {
+    if (deskState?.running && !intervalRef.current) {
+      runningRef.current = true;
+      
+      // Premier cycle immédiat
+      setTimeout(() => {
+        runDeskCycle();
+        simulateExits();
+      }, 100);
+      
+      // Cycles réguliers
+      intervalRef.current = setInterval(() => {
+        runDeskCycle();
+        simulateExits();
+      }, 3000);
+    }
+  }, [deskState?.running, runDeskCycle, simulateExits]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -482,6 +529,16 @@ export default function App() {
               <div className="text-xs text-gray-400">Account</div>
               <div className="text-sm font-mono text-emerald-400">${accountBalance.toLocaleString()}</div>
             </div>
+            <button
+              onClick={() => {
+                localStorage.removeItem('grokDeskState');
+                initDesk();
+              }}
+              className="px-3 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 text-gray-300 border border-gray-600/30 hover:bg-gray-600/50"
+              title="Réinitialiser toutes les données"
+            >
+              🔄 Reset
+            </button>
             <button
               onClick={toggleDesk}
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
