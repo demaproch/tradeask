@@ -8,6 +8,7 @@ import {
   runExitClerk, runAuditor, calculateResultInR
 } from './engine/tradingEngine';
 import { generateMarketData, getCurrentPrices } from './engine/marketSimulator';
+import { fetchAllMarketData, fetchCurrentPrices, checkApiStatus } from './engine/realMarketData';
 
 // ============ MAIN APP ============
 export default function App() {
@@ -18,10 +19,17 @@ export default function App() {
   const [accountBalance] = useState(10000);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
+  // Mode de données : simulation ou live
+  const [dataMode, setDataMode] = useState<'simulation' | 'live'>('simulation');
+  const [loading, setLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<number | null>(null);
+  const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
+  
   // Refs pour éviter les problèmes de closure dans setInterval
   const runningRef = useRef(false);
   const marketDataRef = useRef(marketData);
   const rulesRef = useRef(rules);
+  const dataModeRef = useRef(dataMode);
   
   // Mettre à jour les refs quand les états changent
   useEffect(() => {
@@ -31,10 +39,51 @@ export default function App() {
   useEffect(() => {
     rulesRef.current = rules;
   }, [rules]);
+  
+  useEffect(() => {
+    dataModeRef.current = dataMode;
+  }, [dataMode]);
+  
+  // Vérifier le statut de l'API au démarrage
+  useEffect(() => {
+    checkApiStatus().then(status => {
+      setApiStatus(status ? 'online' : 'offline');
+    });
+  }, []);
 
-  const initDesk = useCallback(() => {
-    const data = generateMarketData();
-    setMarketData(data);
+  // Charger les données de marché selon le mode
+  const loadMarketData = useCallback(async (mode: 'simulation' | 'live') => {
+    setLoading(true);
+    try {
+      let data: Map<string, CoinData>;
+      
+      if (mode === 'live') {
+        console.log('📡 Chargement des données réelles depuis CoinGecko...');
+        data = await fetchAllMarketData();
+        console.log(`✅ ${data.size} coins chargés`);
+      } else {
+        console.log('🎲 Génération de données simulées...');
+        data = generateMarketData();
+        console.log(`✅ ${data.size} coins simulés`);
+      }
+      
+      setMarketData(data);
+      setLastUpdate(Date.now());
+      return data;
+    } catch (error) {
+      console.error('❌ Erreur lors du chargement des données:', error);
+      // Fallback sur la simulation en cas d'erreur
+      const fallbackData = generateMarketData();
+      setMarketData(fallbackData);
+      setLastUpdate(Date.now());
+      return fallbackData;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const initDesk = useCallback(async () => {
+    const data = await loadMarketData(dataMode);
 
     const initialBots: BotStatus[] = [
       { name: 'Screener', role: 'Finds the turn', lastRun: null, status: 'IDLE', output: '0 coins', alerts: 0 },
@@ -60,7 +109,21 @@ export default function App() {
       running: false,
       logs: [],
     });
-  }, [accountBalance, rules]);
+  }, [accountBalance, rules, dataMode, loadMarketData]);
+
+  // Changer le mode de données
+  const switchDataMode = async (mode: 'simulation' | 'live') => {
+    setDataMode(mode);
+    dataModeRef.current = mode;
+    await loadMarketData(mode);
+  };
+
+  // Mettre à jour les données de marché (pour le mode live)
+  const refreshMarketData = async () => {
+    if (dataModeRef.current === 'live') {
+      await loadMarketData('live');
+    }
+  };
 
   // Charger l'état sauvegardé ou initialiser
   useEffect(() => {
@@ -501,6 +564,18 @@ export default function App() {
     }
   }, [deskState?.running, runDeskCycle, simulateExits]);
 
+  // Rafraîchissement automatique des données en mode live (toutes les 2 min)
+  useEffect(() => {
+    if (dataMode !== 'live') return;
+    
+    const refreshInterval = setInterval(async () => {
+      console.log('🔄 Rafraîchissement automatique des données live...');
+      await loadMarketData('live');
+    }, 120000); // 2 minutes
+    
+    return () => clearInterval(refreshInterval);
+  }, [dataMode, loadMarketData]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -525,6 +600,45 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {/* Indicateur de mode de données */}
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${dataMode === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`} />
+              <span className="text-xs text-gray-400">
+                {dataMode === 'live' ? 'LIVE' : 'SIM'}
+              </span>
+              {lastUpdate && (
+                <span className="text-xs text-gray-500">
+                  {new Date(lastUpdate).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+            
+            {/* Toggle mode de données */}
+            <button
+              onClick={() => switchDataMode(dataMode === 'simulation' ? 'live' : 'simulation')}
+              disabled={loading}
+              className={`px-3 py-2 rounded-lg font-medium text-sm transition-all border ${
+                dataMode === 'live'
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30'
+                  : 'bg-blue-500/20 text-blue-400 border-blue-500/30 hover:bg-blue-500/30'
+              } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title={dataMode === 'live' ? 'Mode LIVE : données réelles CoinGecko' : 'Mode SIM : données simulées'}
+            >
+              {loading ? '⏳ Loading...' : dataMode === 'live' ? '📡 LIVE' : '🎲 SIM'}
+            </button>
+            
+            {/* Bouton refresh pour le mode live */}
+            {dataMode === 'live' && (
+              <button
+                onClick={refreshMarketData}
+                disabled={loading}
+                className="px-3 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 text-gray-300 border border-gray-600/30 hover:bg-gray-600/50 disabled:opacity-50"
+                title="Rafraîchir les données de marché"
+              >
+                🔄
+              </button>
+            )}
+            
             <div className="text-right">
               <div className="text-xs text-gray-400">Account</div>
               <div className="text-sm font-mono text-emerald-400">${accountBalance.toLocaleString()}</div>
