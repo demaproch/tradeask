@@ -20,12 +20,18 @@ export default function App() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Mode de données : simulation ou live
-  const [dataMode, setDataMode] = useState<'simulation' | 'live'>('simulation');
+  const [dataMode, setDataMode] = useState<'simulation' | 'live'>(() => {
+    const saved = localStorage.getItem('grokDeskDataMode');
+    return (saved as 'simulation' | 'live') || 'simulation';
+  });
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [debugMode, setDebugMode] = useState(false);
-  const [relaxedMode, setRelaxedMode] = useState(false);
+  const [relaxedMode, setRelaxedMode] = useState(() => {
+    const saved = localStorage.getItem('grokDeskRelaxedMode');
+    return saved === 'true';
+  });
   
   // Refs pour éviter les problèmes de closure dans setInterval
   const runningRef = useRef(false);
@@ -52,6 +58,16 @@ export default function App() {
       setApiStatus(status ? 'online' : 'offline');
     });
   }, []);
+
+  // Sauvegarder le mode de données
+  useEffect(() => {
+    localStorage.setItem('grokDeskDataMode', dataMode);
+  }, [dataMode]);
+
+  // Sauvegarder le mode relaxed
+  useEffect(() => {
+    localStorage.setItem('grokDeskRelaxedMode', String(relaxedMode));
+  }, [relaxedMode]);
 
   // Charger les données de marché selon le mode
   const loadMarketData = useCallback(async (mode: 'simulation' | 'live') => {
@@ -119,6 +135,7 @@ export default function App() {
   const switchDataMode = async (mode: 'simulation' | 'live') => {
     setDataMode(mode);
     dataModeRef.current = mode;
+    localStorage.setItem('grokDeskDataMode', mode);
     
     // Arrêter le desk temporairement
     if (deskState?.running) {
@@ -245,24 +262,32 @@ export default function App() {
 
   // Charger l'état sauvegardé ou initialiser
   useEffect(() => {
-    const savedState = localStorage.getItem('grokDeskState');
-    if (savedState) {
-      try {
-        const parsed = JSON.parse(savedState);
-        // Restaurer l'état avec running = true si c'était le cas
-        setDeskState({
-          ...parsed,
-          zoneMaps: new Map(Object.entries(parsed.zoneMaps || {})),
-          running: parsed.running || false,
-        });
-      } catch (e) {
-        console.error('Failed to load saved state:', e);
+    const loadSavedState = async () => {
+      const savedState = localStorage.getItem('grokDeskState');
+      
+      // Toujours charger les données de marché selon le mode sauvegardé
+      const initialData = await loadMarketData(dataMode);
+      
+      if (savedState) {
+        try {
+          const parsed = JSON.parse(savedState);
+          // Restaurer l'état avec running = true si c'était le cas
+          setDeskState({
+            ...parsed,
+            zoneMaps: new Map(Object.entries(parsed.zoneMaps || {})),
+            running: parsed.running || false,
+          });
+        } catch (e) {
+          console.error('Failed to load saved state:', e);
+          initDesk();
+        }
+      } else {
         initDesk();
       }
-    } else {
-      initDesk();
-    }
-  }, [initDesk]);
+    };
+    
+    loadSavedState();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Sauvegarder l'état à chaque changement (sans les données de marché)
   useEffect(() => {
@@ -843,6 +868,10 @@ export default function App() {
             <button
               onClick={() => {
                 localStorage.removeItem('grokDeskState');
+                localStorage.removeItem('grokDeskDataMode');
+                localStorage.removeItem('grokDeskRelaxedMode');
+                setDataMode('simulation');
+                setRelaxedMode(false);
                 initDesk();
               }}
               className="px-3 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 text-gray-300 border border-gray-600/30 hover:bg-gray-600/50"
