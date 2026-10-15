@@ -180,6 +180,9 @@ export default function App() {
       return;
     }
 
+    // Activer le mode debug visuellement
+    setDebugMode(true);
+    
     const now = Date.now();
     const coin = deskState.watchlist[0].coin;
     const currentPrices = getCurrentPrices(marketDataRef.current);
@@ -258,6 +261,12 @@ export default function App() {
 
     console.log('✅ DEBUG: Trade créé avec succès. Va dans l\'onglet Gate pour voir l\'alerte.');
     window.alert(`🐛 Debug trade créé pour ${coin}!\n\nEntry: ${entry.toFixed(2)}\nStop: ${stop.toFixed(2)}\nSize: ${size.toFixed(2)} USDT\n\nVa dans l'onglet Gate pour voir l'alerte.`);
+    
+    // Désactiver le mode debug après 5 secondes
+    setTimeout(() => {
+      setDebugMode(false);
+      console.log('🐛 DEBUG MODE: Désactivé');
+    }, 5000);
   };
 
   // Charger l'état sauvegardé ou initialiser
@@ -804,11 +813,14 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* Indicateur de mode de données */}
+            {/* Indicateur de statut API */}
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${dataMode === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`} />
+              <div className={`w-2 h-2 rounded-full ${
+                apiStatus === 'online' ? 'bg-emerald-500' : 
+                apiStatus === 'offline' ? 'bg-red-500' : 'bg-gray-500'
+              }`} />
               <span className="text-xs text-gray-400">
-                {dataMode === 'live' ? 'LIVE' : 'SIM'}
+                API: {apiStatus === 'online' ? '✓' : apiStatus === 'offline' ? '✗' : '?'}
               </span>
               {lastUpdate && (
                 <span className="text-xs text-gray-500">
@@ -895,6 +907,85 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Status Panel */}
+      <div className="border-b border-gray-800 bg-gradient-to-r from-gray-900/50 to-gray-800/50 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-6 flex-wrap">
+            {/* Desk Status */}
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${deskState.running ? 'bg-emerald-500 animate-pulse' : 'bg-gray-600'}`} />
+              <span className="text-sm font-medium text-gray-300">
+                {deskState.running ? 'DESK RUNNING' : 'DESK STOPPED'}
+              </span>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-700" />
+
+            {/* Data Mode */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 uppercase tracking-wide">Data:</span>
+              <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                dataMode === 'live' 
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                  : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+              }`}>
+                {dataMode === 'live' ? '📡 LIVE' : '🎲 SIM'}
+              </div>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-700" />
+
+            {/* Detection Mode */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 uppercase tracking-wide">Detection:</span>
+              <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                relaxedMode 
+                  ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' 
+                  : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+              }`}>
+                {relaxedMode ? '🔓 RELAXED' : '🔒 STRICT'}
+              </div>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-700" />
+
+            {/* Debug Mode */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 uppercase tracking-wide">Debug:</span>
+              <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                debugMode 
+                  ? 'bg-pink-500/20 text-pink-400 border border-pink-500/30 animate-pulse' 
+                  : 'bg-gray-700/50 text-gray-500 border border-gray-600/30'
+              }`}>
+                {debugMode ? '🐛 ACTIVE' : '⚪ OFF'}
+              </div>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px h-6 bg-gray-700" />
+
+            {/* Stats */}
+            <div className="flex items-center gap-4 ml-auto">
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Watchlist</div>
+                <div className="text-sm font-mono text-blue-400">{deskState.watchlist.length}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Positions</div>
+                <div className="text-sm font-mono text-emerald-400">{deskState.positions.filter(p => p.status === 'OPEN').length}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Trades</div>
+                <div className="text-sm font-mono text-purple-400">{deskState.trades.filter(t => !t.wasSkipped).length}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Navigation */}
       <nav className="border-b border-gray-800 bg-gray-900/30">
