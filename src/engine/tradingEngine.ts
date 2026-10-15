@@ -209,16 +209,23 @@ export function runCartographer(
   const logs: LogEntry[] = [];
   const now = Date.now();
 
+  console.log(`🗺️ Cartographer: analyse de ${watchlist.length} coins...`);
+
   for (const entry of watchlist) {
     const h4Candles = h4Data.get(entry.coin) || [];
     const h1Candles = h1Data.get(entry.coin) || [];
     const currentPrice = currentPrices.get(entry.coin) || 0;
 
+    console.log(`  ${entry.coin}: h4=${h4Candles.length}, h1=${h1Candles.length}, price=${currentPrice.toFixed(2)}`);
+
     // Find FVGs across the full impulse
     const fvgs = findFVGs(h4Candles, entry.coin);
+    console.log(`    📊 ${entry.coin}: ${fvgs.length} FVGs trouvés`);
     
     // Check which zones are tested
     const updatedZones = checkZoneTested(fvgs, currentPrice);
+    const testedCount = updatedZones.filter(z => z.status === 'TESTED').length;
+    console.log(`    📊 ${entry.coin}: ${testedCount} zones testées`);
 
     // Check 1H confirmation for tested zones
     const confirmedZones = updatedZones.map(zone => {
@@ -230,6 +237,7 @@ export function runCartographer(
         // For shorts: price rejected up from zone (wick above, close below)
         const rejected = lastH1.high >= zone.zoneBottom && lastH1.close < zone.zoneTop;
         if (rejected) {
+          console.log(`    ✅ ${entry.coin} zone [${zone.zoneBottom.toFixed(2)}-${zone.zoneTop.toFixed(2)}] CONFIRMÉE`);
           logs.push({
             timestamp: now,
             bot: 'Cartographer',
@@ -241,6 +249,9 @@ export function runCartographer(
       }
       return zone;
     });
+
+    const confirmedCount = confirmedZones.filter(z => z.confirmed).length;
+    console.log(`    📊 ${entry.coin}: ${confirmedCount} zones confirmées`);
 
     // Sort as ladder (top to bottom)
     const sorted = confirmedZones.sort((a, b) => b.zoneTop - a.zoneTop);
@@ -254,11 +265,12 @@ export function runCartographer(
     logs.push({
       timestamp: now,
       bot: 'Cartographer',
-      message: `${entry.coin}: mapped ${sorted.length} zones, ${sorted.filter(z => z.confirmed).length} confirmed`,
+      message: `${entry.coin}: mapped ${sorted.length} zones, ${confirmedCount} confirmed`,
       level: 'INFO',
     });
   }
 
+  console.log(`✅ Cartographer terminé: ${zoneMaps.size} coins cartographiés`);
   return { zoneMaps, logs };
 }
 
@@ -285,10 +297,15 @@ export function runRiskOfficer(
   const logs: LogEntry[] = [];
   const now = Date.now();
 
+  console.log(`📐 Risk Officer: analyse de ${zoneMaps.size} coins...`);
+
   for (const [coin, zoneMap] of zoneMaps) {
     const confirmedZones = zoneMap.zones.filter(z => z.confirmed && z.status === 'TESTED');
+    console.log(`  ${coin}: ${confirmedZones.length} zones confirmées et testées`);
     
     for (const zone of confirmedZones) {
+      console.log(`    🎯 ${coin} zone [${zone.zoneBottom.toFixed(2)}-${zone.zoneTop.toFixed(2)}] → création plan`);
+      
       // Check if we already have a position on this coin
       const existingPos = existingPositions.find(p => p.coin === coin && p.status === 'OPEN');
       const addNumber = existingPos ? existingPos.addNumber + 1 : 1;
@@ -303,6 +320,7 @@ export function runRiskOfficer(
         if (existingPos && !existingPos.breakeven) {
           rejectReason = `Cannot add: previous position not at breakeven`;
           riskPct = 0;
+          console.log(`    ❌ ${coin} add #${addNumber} REJECTED: ${rejectReason}`);
           logs.push({
             timestamp: now,
             bot: 'Risk Officer',
@@ -330,6 +348,8 @@ export function runRiskOfficer(
       const stop = zone.zoneBottom < zone.zoneTop ? zone.zoneBottom : zone.zoneTop * 0.98;
       const size = calculatePositionSize(accountBalance, entry, stop, riskPct);
 
+      console.log(`    ✅ ${coin} add #${addNumber}: size=${size.toFixed(2)}, risk=${riskPct}%, entry=${entry.toFixed(2)}, stop=${stop.toFixed(2)}`);
+
       tradePlans.push({
         id: `tp-${coin}-${now}-${addNumber}`,
         coin,
@@ -351,6 +371,7 @@ export function runRiskOfficer(
     }
   }
 
+  console.log(`✅ Risk Officer terminé: ${tradePlans.length} trade plans créés`);
   return { tradePlans, logs };
 }
 

@@ -5,7 +5,7 @@ import {
 } from './types';
 import {
   DEFAULT_RULES, runScreener, runCartographer, runRiskOfficer,
-  runExitClerk, runAuditor, calculateResultInR
+  runExitClerk, runAuditor, calculateResultInR, calculatePositionSize
 } from './engine/tradingEngine';
 import { generateMarketData, getCurrentPrices } from './engine/marketSimulator';
 import { fetchAllMarketData, fetchCurrentPrices, checkApiStatus } from './engine/realMarketData';
@@ -24,6 +24,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
+  const [debugMode, setDebugMode] = useState(false);
   
   // Refs pour éviter les problèmes de closure dans setInterval
   const runningRef = useRef(false);
@@ -149,6 +150,96 @@ export default function App() {
     if (dataModeRef.current === 'live') {
       await loadMarketData('live');
     }
+  };
+
+  // Mode debug : force la création de trades pour tester le flux
+  const triggerDebugTrade = () => {
+    console.log('🐛 DEBUG MODE: Création forcée de trades...');
+    
+    if (!deskState || deskState.watchlist.length === 0) {
+      console.log('❌ DEBUG: Pas de coins dans la watchlist');
+      alert('Pas de coins dans la watchlist. Attends que le Screener détecte des coins.');
+      return;
+    }
+
+    const now = Date.now();
+    const coin = deskState.watchlist[0].coin;
+    const currentPrices = getCurrentPrices(marketDataRef.current);
+    const price = currentPrices.get(coin) || 100;
+
+    console.log(`🐛 DEBUG: Création trade pour ${coin} @ ${price}`);
+
+    // Créer une zone artificielle
+    const zone = {
+      id: `debug-zone-${now}`,
+      coin,
+      zoneTop: price * 1.02,
+      zoneBottom: price * 0.98,
+      status: 'TESTED' as const,
+      confirmed: true,
+      createdAt: now,
+      testedAt: now,
+    };
+
+    // Créer un trade plan
+    const entry = zone.zoneTop;
+    const stop = zone.zoneBottom;
+    const size = calculatePositionSize(deskState.accountBalance, entry, stop, rules.riskPerTrade);
+
+    const plan: TradePlan = {
+      id: `debug-plan-${now}`,
+      coin,
+      entry,
+      stop,
+      size,
+      riskPct: rules.riskPerTrade,
+      addNumber: 1,
+      status: 'APPROVED',
+      timestamp: now,
+    };
+
+    console.log(`🐛 DEBUG: Plan créé: ${coin} entry=${entry.toFixed(2)}, stop=${stop.toFixed(2)}, size=${size.toFixed(2)}`);
+
+    // Créer une alerte
+    const gateAlert: GateAlert = {
+      id: `debug-alert-${now}`,
+      tradePlan: plan,
+      decision: 'PENDING',
+      sentAt: now,
+    };
+
+    console.log(`🐛 DEBUG: Alerte créée: ${gateAlert.id}`);
+
+    // Mettre à jour l'état
+    setDeskState(prev => {
+      if (!prev) return prev;
+
+      const newZoneMaps = new Map(prev.zoneMaps);
+      newZoneMaps.set(coin, {
+        coin,
+        zones: [zone],
+        lastUpdated: now,
+      });
+
+      return {
+        ...prev,
+        zoneMaps: newZoneMaps,
+        tradePlans: [...prev.tradePlans, plan],
+        alerts: [...prev.alerts, gateAlert],
+        logs: [
+          {
+            timestamp: now,
+            bot: 'Debug',
+            message: `🐛 DEBUG: Trade forcé pour ${coin} - entry=${entry.toFixed(2)}, stop=${stop.toFixed(2)}, size=${size.toFixed(2)}`,
+            level: 'SUCCESS' as const,
+          },
+          ...prev.logs,
+        ].slice(0, 200),
+      };
+    });
+
+    console.log('✅ DEBUG: Trade créé avec succès. Va dans l\'onglet Gate pour voir l\'alerte.');
+    window.alert(`🐛 Debug trade créé pour ${coin}!\n\nEntry: ${entry.toFixed(2)}\nStop: ${stop.toFixed(2)}\nSize: ${size.toFixed(2)} USDT\n\nVa dans l'onglet Gate pour voir l'alerte.`);
   };
 
   // Charger l'état sauvegardé ou initialiser
@@ -730,6 +821,13 @@ export default function App() {
               <div className="text-xs text-gray-400">Account</div>
               <div className="text-sm font-mono text-emerald-400">${accountBalance.toLocaleString()}</div>
             </div>
+            <button
+              onClick={triggerDebugTrade}
+              className="px-3 py-2 rounded-lg font-medium text-sm transition-all bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30"
+              title="Mode Debug: Force la création d'un trade pour tester le flux"
+            >
+              🐛 Debug
+            </button>
             <button
               onClick={() => {
                 localStorage.removeItem('grokDeskState');
