@@ -25,6 +25,7 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [debugMode, setDebugMode] = useState(false);
+  const [relaxedMode, setRelaxedMode] = useState(false);
   
   // Refs pour éviter les problèmes de closure dans setInterval
   const runningRef = useRef(false);
@@ -341,7 +342,7 @@ export default function App() {
         h1Data.set(coin, data.h1Candles);
       }
       const currentPrices = getCurrentPrices(currentMarketData);
-      const cartographerResult = runCartographer(newWatchlist, h4Data, h1Data, currentPrices);
+      const cartographerResult = runCartographer(newWatchlist, h4Data, h1Data, currentPrices, relaxedMode);
       console.log(`✅ Cartographer: ${cartographerResult.zoneMaps.size} coins cartographiés`);
       allLogs.push(...cartographerResult.logs);
       let totalZones = 0;
@@ -821,6 +822,17 @@ export default function App() {
               <div className="text-xs text-gray-400">Account</div>
               <div className="text-sm font-mono text-emerald-400">${accountBalance.toLocaleString()}</div>
             </div>
+            <button
+              onClick={() => setRelaxedMode(!relaxedMode)}
+              className={`px-3 py-2 rounded-lg font-medium text-sm transition-all ${
+                relaxedMode
+                  ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                  : 'bg-gray-700/50 text-gray-300 border border-gray-600/30'
+              } hover:opacity-80`}
+              title={relaxedMode ? 'Mode RELAXED: Détection plus permissive' : 'Mode STRICT: Détection stricte'}
+            >
+              {relaxedMode ? '🔓 Relaxed' : '🔒 Strict'}
+            </button>
             <button
               onClick={triggerDebugTrade}
               className="px-3 py-2 rounded-lg font-medium text-sm transition-all bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30"

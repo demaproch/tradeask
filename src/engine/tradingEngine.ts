@@ -143,7 +143,7 @@ export function runScreener(
 
 // ============ CARTOGRAPHER ============
 // Fair Value Gap detection
-export function findFVGs(candles: Candle[], coin: string): FairValueGap[] {
+export function findFVGs(candles: Candle[], coin: string, relaxed: boolean = false): FairValueGap[] {
   const fvgs: FairValueGap[] = [];
   
   for (let i = 2; i < candles.length; i++) {
@@ -163,6 +163,33 @@ export function findFVGs(candles: Candle[], coin: string): FairValueGap[] {
         createdAt: c2.timestamp,
       });
     }
+    
+    // Mode relaxed: détecter aussi les gaps partiels (overlap de 50%)
+    if (relaxed && i >= 2) {
+      const gapSize = c1.low - c3.high;
+      const avgRange = (c1.high - c1.low + c2.high - c2.low + c3.high - c3.low) / 3;
+      
+      // Si le gap fait au moins 30% de la range moyenne, c'est un FVG valide
+      if (gapSize > 0 && gapSize > avgRange * 0.3) {
+        // Vérifier qu'on ne l'a pas déjà ajouté
+        const alreadyAdded = fvgs.some(f => 
+          Math.abs(f.zoneTop - c1.low) < 0.01 && Math.abs(f.zoneBottom - c3.high) < 0.01
+        );
+        
+        if (!alreadyAdded) {
+          fvgs.push({
+            id: `fvg-relaxed-${coin}-${i}-${Date.now()}`,
+            coin,
+            zoneTop: c1.low,
+            zoneBottom: c3.high,
+            status: 'OPEN',
+            confirmed: false,
+            createdAt: c2.timestamp,
+          });
+        }
+      }
+    }
+    
     // Bullish FVG: c1's high < c3's low (gap up) - tracked but not traded
     if (c1.high < c3.low) {
       fvgs.push({
@@ -180,11 +207,16 @@ export function findFVGs(candles: Candle[], coin: string): FairValueGap[] {
   return fvgs;
 }
 
-export function checkZoneTested(zones: FairValueGap[], currentPrice: number): FairValueGap[] {
+export function checkZoneTested(zones: FairValueGap[], currentPrice: number, relaxed: boolean = false): FairValueGap[] {
   return zones.map(zone => {
     if (zone.status === 'OPEN') {
       // Partial wick test counts
-      const touched = currentPrice >= zone.zoneBottom && currentPrice <= zone.zoneTop;
+      // Mode relaxed: tolérance de 1% autour de la zone
+      const tolerance = relaxed ? 0.01 : 0;
+      const zoneTopWithTolerance = zone.zoneTop * (1 + tolerance);
+      const zoneBottomWithTolerance = zone.zoneBottom * (1 - tolerance);
+      
+      const touched = currentPrice >= zoneBottomWithTolerance && currentPrice <= zoneTopWithTolerance;
       if (touched) {
         return { ...zone, status: 'TESTED' as const, testedAt: Date.now() };
       }
@@ -203,13 +235,14 @@ export function runCartographer(
   watchlist: WatchlistEntry[],
   h4Data: Map<string, Candle[]>,
   h1Data: Map<string, Candle[]>,
-  currentPrices: Map<string, number>
+  currentPrices: Map<string, number>,
+  relaxed: boolean = false
 ): { zoneMaps: Map<string, ZoneMap>; logs: LogEntry[] } {
   const zoneMaps = new Map<string, ZoneMap>();
   const logs: LogEntry[] = [];
   const now = Date.now();
 
-  console.log(`🗺️ Cartographer: analyse de ${watchlist.length} coins...`);
+  console.log(`🗺️ Cartographer: analyse de ${watchlist.length} coins (mode ${relaxed ? 'RELAXED' : 'STRICT'})...`);
 
   for (const entry of watchlist) {
     const h4Candles = h4Data.get(entry.coin) || [];
@@ -219,11 +252,11 @@ export function runCartographer(
     console.log(`  ${entry.coin}: h4=${h4Candles.length}, h1=${h1Candles.length}, price=${currentPrice.toFixed(2)}`);
 
     // Find FVGs across the full impulse
-    const fvgs = findFVGs(h4Candles, entry.coin);
+    const fvgs = findFVGs(h4Candles, entry.coin, relaxed);
     console.log(`    📊 ${entry.coin}: ${fvgs.length} FVGs trouvés`);
     
     // Check which zones are tested
-    const updatedZones = checkZoneTested(fvgs, currentPrice);
+    const updatedZones = checkZoneTested(fvgs, currentPrice, relaxed);
     const testedCount = updatedZones.filter(z => z.status === 'TESTED').length;
     console.log(`    📊 ${entry.coin}: ${testedCount} zones testées`);
 
@@ -235,7 +268,11 @@ export function runCartographer(
         const prevH1 = h1Candles[h1Candles.length - 2];
         
         // For shorts: price rejected up from zone (wick above, close below)
-        const rejected = lastH1.high >= zone.zoneBottom && lastH1.close < zone.zoneTop;
+        // Mode relaxed: confirmation plus permissive
+        const rejected = relaxed 
+          ? lastH1.high >= zone.zoneBottom * 0.995 // Tolérance de 0.5%
+          : lastH1.high >= zone.zoneBottom && lastH1.close < zone.zoneTop;
+        
         if (rejected) {
           console.log(`    ✅ ${entry.coin} zone [${zone.zoneBottom.toFixed(2)}-${zone.zoneTop.toFixed(2)}] CONFIRMÉE`);
           logs.push({
