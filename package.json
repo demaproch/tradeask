@@ -1,0 +1,25 @@
+{
+  "name": "tradeask",
+  "version": "1.0.0",
+  "description": "Grok Bot Trading Strategy (TypeScript)",
+  "type": "module",
+  "main": "dist/app.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/app.ts",
+    "start": "node dist/app.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/strategy.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ccxt": "^4.5.88"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
